@@ -91,6 +91,15 @@ export const chatsApi = {
     return response.data.avatar;
   },
 
+  getAvatars: async (sessionId: string, entityIds: number[]): Promise<Record<number, string>> => {
+    const response = await api.post('/chats/avatars', {
+      entity_ids: entityIds,
+    }, {
+      params: { session_id: sessionId },
+    });
+    return response.data.avatars;
+  },
+
   markAsRead: async (sessionId: string, chatId: number): Promise<void> => {
     await api.post(`/chats/mark-read/${chatId}`, null, {
       params: { session_id: sessionId },

@@ -13,6 +13,9 @@ export const useTelegram = () => {
     prependMessages,
     setIsLoading,
     setError,
+    avatars,
+    setAvatars,
+    setAvatar,
   } = useChatStore();
   const [authStep, setAuthStep] = useState<'phone' | 'code' | '2fa' | 'done'>('phone');
 
@@ -164,6 +167,38 @@ export const useTelegram = () => {
     }
   }, [auth.sessionId, setDialogs, setIsLoading, setError]);
 
+  // Load avatars for multiple entities
+  const loadAvatars = useCallback(async (entityIds: number[]) => {
+    if (!auth.sessionId) return;
+
+    // Filter out already cached avatars
+    const uncachedIds = entityIds.filter(id => !avatars[id]);
+    if (uncachedIds.length === 0) return;
+
+    try {
+      const result = await chatsApi.getAvatars(auth.sessionId, uncachedIds);
+      if (result && Object.keys(result).length > 0) {
+        setAvatars(result);
+      }
+    } catch (err) {
+      console.error('Failed to load avatars:', err);
+    }
+  }, [auth.sessionId, avatars, setAvatars]);
+
+  // Load single avatar
+  const loadAvatar = useCallback(async (entityId: number) => {
+    if (!auth.sessionId || avatars[entityId]) return;
+
+    try {
+      const avatar = await chatsApi.getAvatar(auth.sessionId, entityId);
+      if (avatar) {
+        setAvatar(entityId, avatar);
+      }
+    } catch (err) {
+      console.error('Failed to load avatar:', err);
+    }
+  }, [auth.sessionId, avatars, setAvatar]);
+
   const loadMessages = useCallback(async (chatId: number, limit = 50) => {
     if (!auth.sessionId) return;
 
@@ -253,6 +288,8 @@ export const useTelegram = () => {
 
     // Chats
     loadDialogs,
+    loadAvatars,
+    loadAvatar,
     loadMessages,
     loadMoreMessages,
     sendMessage,
