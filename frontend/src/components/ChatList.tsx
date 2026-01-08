@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useTelegram } from '../hooks/useTelegram';
 import { format, isToday, isYesterday } from 'date-fns';
@@ -12,7 +12,10 @@ import {
   Moon,
   Bookmark,
   HelpCircle,
-  X
+  X,
+  User,
+  MessageCircle,
+  Megaphone
 } from 'lucide-react';
 
 // Avatar gradient colors - Telegram style
@@ -31,17 +34,27 @@ const getAvatarGradient = (id: number) => {
   return avatarColors[index];
 };
 
+type FilterTab = 'all' | 'users' | 'groups' | 'channels';
+
 export const ChatList: React.FC = () => {
-  const { dialogs, activeChat, setActiveChat, auth } = useChatStore();
-  const { loadDialogs, logout } = useTelegram();
+  const { dialogs, activeChat, setActiveChat, auth, avatars } = useChatStore();
+  const { loadDialogs, loadAvatars, logout } = useTelegram();
   const [searchQuery, setSearchQuery] = useState('');
   const [showMenu, setShowMenu] = useState(false);
+  const [activeTab, setActiveTab] = useState<FilterTab>('all');
 
   useEffect(() => {
     if (auth.isAuthenticated) {
       loadDialogs();
     }
   }, [auth.isAuthenticated, loadDialogs]);
+
+  // Load avatars after dialogs are loaded
+  useEffect(() => {
+    if (dialogs.length > 0 && auth.isAuthenticated) {
+      loadAvatars(dialogs.map(d => d.id));
+    }
+  }, [dialogs.length, auth.isAuthenticated]);
 
   const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '';
@@ -67,14 +80,54 @@ export const ChatList: React.FC = () => {
     }
   };
 
-  const filteredDialogs = dialogs.filter((d) =>
-    d.name.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Filter dialogs based on active tab and search query
+  const filteredDialogs = useMemo(() => {
+    let filtered = dialogs;
+
+    // Filter by tab
+    switch (activeTab) {
+      case 'users':
+        filtered = dialogs.filter(d => d.type === 'user');
+        break;
+      case 'groups':
+        filtered = dialogs.filter(d => d.type === 'group' || d.type === 'supergroup');
+        break;
+      case 'channels':
+        filtered = dialogs.filter(d => d.type === 'channel');
+        break;
+      default:
+        break;
+    }
+
+    // Filter by search query
+    if (searchQuery) {
+      filtered = filtered.filter(d =>
+        d.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    return filtered;
+  }, [dialogs, activeTab, searchQuery]);
+
+  // Count by type
+  const counts = useMemo(() => ({
+    all: dialogs.length,
+    users: dialogs.filter(d => d.type === 'user').length,
+    groups: dialogs.filter(d => d.type === 'group' || d.type === 'supergroup').length,
+    channels: dialogs.filter(d => d.type === 'channel').length,
+  }), [dialogs]);
+
+  const tabs: { key: FilterTab; label: string; icon: React.ReactNode; count: number }[] = [
+    { key: 'all', label: 'Hammasi', icon: <MessageCircle size={18} />, count: counts.all },
+    { key: 'users', label: 'Kontaktlar', icon: <User size={18} />, count: counts.users },
+    { key: 'groups', label: 'Guruhlar', icon: <Users size={18} />, count: counts.groups },
+    { key: 'channels', label: 'Kanallar', icon: <Megaphone size={18} />, count: counts.channels },
+  ];
 
   return (
     <div className="w-[320px] h-full bg-[#17212b] flex flex-col border-r border-[#0e1621]">
       {/* Header */}
-      <div className="h-[56px] flex items-center px-3 gap-2">
+      <div className="h-[56px] flex items-center px-3 gap-2 flex-shrink-0">
         <button
           onClick={() => setShowMenu(!showMenu)}
           className="w-10 h-10 flex items-center justify-center hover:bg-[#232e3c] rounded-full transition-colors"
@@ -97,6 +150,34 @@ export const ChatList: React.FC = () => {
         </div>
       </div>
 
+      {/* Tabs */}
+      <div className="flex border-b border-[#232e3c] flex-shrink-0">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key)}
+            className={`flex-1 py-3 px-2 flex flex-col items-center gap-1 transition-colors relative ${
+              activeTab === tab.key
+                ? 'text-[#3390ec]'
+                : 'text-[#6c7883] hover:text-white'
+            }`}
+          >
+            {tab.icon}
+            <span className="text-[11px] font-medium">{tab.label}</span>
+            {tab.count > 0 && (
+              <span className={`absolute top-1 right-2 text-[10px] min-w-[18px] h-[18px] flex items-center justify-center rounded-full ${
+                activeTab === tab.key ? 'bg-[#3390ec] text-white' : 'bg-[#232e3c] text-[#6c7883]'
+              }`}>
+                {tab.count > 99 ? '99+' : tab.count}
+              </span>
+            )}
+            {activeTab === tab.key && (
+              <div className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#3390ec]" />
+            )}
+          </button>
+        ))}
+      </div>
+
       {/* Menu dropdown */}
       {showMenu && (
         <>
@@ -108,12 +189,20 @@ export const ChatList: React.FC = () => {
             <div className="px-4 py-3 border-b border-[#232e3c]">
               <div className="flex items-center gap-3">
                 <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-lg"
+                  className="w-12 h-12 rounded-full flex items-center justify-center text-white font-medium text-lg overflow-hidden"
                   style={{
                     background: `linear-gradient(135deg, ${getAvatarGradient(auth.user?.id || 0)[0]}, ${getAvatarGradient(auth.user?.id || 0)[1]})`
                   }}
                 >
-                  {auth.user?.first_name?.charAt(0).toUpperCase()}
+                  {auth.user?.id && avatars[auth.user.id] ? (
+                    <img
+                      src={`data:image/jpeg;base64,${avatars[auth.user.id]}`}
+                      alt=""
+                      className="w-full h-full object-cover"
+                    />
+                  ) : (
+                    auth.user?.first_name?.charAt(0).toUpperCase()
+                  )}
                 </div>
                 <div>
                   <p className="text-white font-medium">
@@ -166,6 +255,7 @@ export const ChatList: React.FC = () => {
         {filteredDialogs.map((dialog) => {
           const gradient = getAvatarGradient(dialog.id);
           const isActive = activeChat === dialog.id;
+          const avatarUrl = avatars[dialog.id];
 
           return (
             <div
@@ -180,18 +270,18 @@ export const ChatList: React.FC = () => {
               <div className="h-full flex items-center gap-3 px-2">
                 {/* Avatar */}
                 <div
-                  className="w-[54px] h-[54px] rounded-full flex items-center justify-center text-white font-medium text-xl flex-shrink-0"
+                  className="w-[54px] h-[54px] rounded-full flex items-center justify-center text-white font-medium text-xl flex-shrink-0 overflow-hidden"
                   style={{
-                    background: dialog.avatar
+                    background: avatarUrl
                       ? undefined
                       : `linear-gradient(135deg, ${gradient[0]}, ${gradient[1]})`
                   }}
                 >
-                  {dialog.avatar ? (
+                  {avatarUrl ? (
                     <img
-                      src={`data:image/jpeg;base64,${dialog.avatar}`}
+                      src={`data:image/jpeg;base64,${avatarUrl}`}
                       alt={dialog.name}
-                      className="w-full h-full rounded-full object-cover"
+                      className="w-full h-full object-cover"
                     />
                   ) : (
                     <span>{dialog.name.charAt(0).toUpperCase()}</span>
@@ -237,7 +327,11 @@ export const ChatList: React.FC = () => {
 
         {filteredDialogs.length === 0 && (
           <div className="p-8 text-center text-gray-500">
-            {searchQuery ? 'Hech narsa topilmadi' : 'Chatlar yo\'q'}
+            {searchQuery ? 'Hech narsa topilmadi' :
+             activeTab === 'users' ? 'Kontaktlar yo\'q' :
+             activeTab === 'groups' ? 'Guruhlar yo\'q' :
+             activeTab === 'channels' ? 'Kanallar yo\'q' :
+             'Chatlar yo\'q'}
           </div>
         )}
       </div>

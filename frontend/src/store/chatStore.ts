@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, createJSONStorage } from 'zustand/middleware';
 import type { Dialog, Message, User, AuthState } from '../types';
 
 interface ChatStore {
@@ -24,6 +24,11 @@ interface ChatStore {
   updateMessage: (chatId: number, message: Message) => void;
   removeMessages: (chatId: number, messageIds: number[]) => void;
   prependMessages: (chatId: number, messages: Message[]) => void;
+
+  // Avatars cache
+  avatars: Record<number, string>;
+  setAvatar: (entityId: number, avatar: string) => void;
+  setAvatars: (avatars: Record<number, string>) => void;
 
   // UI state
   isLoading: boolean;
@@ -60,6 +65,7 @@ export const useChatStore = create<ChatStore>()(
           dialogs: [],
           messages: {},
           activeChat: null,
+          avatars: {},
         }),
 
       // Dialogs
@@ -127,6 +133,17 @@ export const useChatStore = create<ChatStore>()(
           };
         }),
 
+      // Avatars
+      avatars: {},
+      setAvatar: (entityId, avatar) =>
+        set((state) => ({
+          avatars: { ...state.avatars, [entityId]: avatar },
+        })),
+      setAvatars: (avatars) =>
+        set((state) => ({
+          avatars: { ...state.avatars, ...avatars },
+        })),
+
       // UI
       isLoading: false,
       setIsLoading: (loading) => set({ isLoading: loading }),
@@ -143,11 +160,17 @@ export const useChatStore = create<ChatStore>()(
     }),
     {
       name: 'telegram-clone-storage',
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (state) => ({
         auth: {
           sessionString: state.auth.sessionString,
+          sessionId: state.auth.sessionId,
           isAuthenticated: state.auth.isAuthenticated,
+          user: state.auth.user,
         },
+        dialogs: state.dialogs,
+        avatars: state.avatars,
+        activeChat: state.activeChat,
       }),
     }
   )
