@@ -76,7 +76,12 @@ export const MessageInput: React.FC = () => {
   };
 
   const handleSend = async () => {
-    if (!text.trim() || !activeChat) return;
+    console.log('handleSend called:', { text: text.trim(), activeChat });
+
+    if (!text.trim() || !activeChat) {
+      console.log('handleSend: early return - no text or activeChat');
+      return;
+    }
 
     const messageText = text.trim();
     setText('');

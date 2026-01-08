@@ -114,25 +114,31 @@ export const useTelegram = () => {
   }, [auth.sessionId, setAuth, setIsLoading, setError]);
 
   const restoreSession = useCallback(async () => {
-    if (!auth.sessionString) {
+    const sessionString = auth.sessionString;
+    if (!sessionString) {
+      console.log('No sessionString found');
       return false;
     }
 
     setIsLoading(true);
     setError(null);
     try {
-      const result = await authApi.restoreSession(auth.sessionString);
+      console.log('Restoring session...');
+      const result = await authApi.restoreSession(sessionString);
       if (result.success) {
         setAuth({
           isAuthenticated: true,
           sessionId: result.session_id,
+          sessionString: sessionString, // Keep the sessionString
           user: result.user,
         });
         setAuthStep('done');
+        console.log('Session restored, sessionId:', result.session_id);
         return true;
       }
       return false;
     } catch (err) {
+      console.error('Session restore failed:', err);
       // Session invalid, clear it
       clearAuth();
       return false;
@@ -159,9 +165,12 @@ export const useTelegram = () => {
 
     setIsLoading(true);
     try {
-      const dialogs = await chatsApi.getDialogs(auth.sessionId);
+      // Load up to 300 dialogs to get all chats
+      const dialogs = await chatsApi.getDialogs(auth.sessionId, 300);
+      console.log(`Loaded ${dialogs.length} dialogs`);
       setDialogs(dialogs);
     } catch (err) {
+      console.error('Failed to load dialogs:', err);
       setError(err instanceof Error ? err.message : 'Failed to load dialogs');
     } finally {
       setIsLoading(false);
@@ -173,6 +182,7 @@ export const useTelegram = () => {
 
     try {
       const contacts = await chatsApi.getContacts(auth.sessionId);
+      console.log(`Loaded ${contacts.length} contacts`);
       setContacts(contacts);
     } catch (err) {
       console.error('Failed to load contacts:', err);
@@ -242,11 +252,20 @@ export const useTelegram = () => {
   }, [auth.sessionId, prependMessages]);
 
   const sendMessage = useCallback(async (chatId: number, text: string, replyTo?: number): Promise<Message | null> => {
-    if (!auth.sessionId) return null;
+    console.log('sendMessage called:', { chatId, text, replyTo, sessionId: auth.sessionId });
+
+    if (!auth.sessionId) {
+      console.error('sendMessage: No sessionId available!');
+      setError('Session not found. Please refresh the page.');
+      return null;
+    }
 
     try {
-      return await messagesApi.sendMessage(auth.sessionId, chatId, text, replyTo);
+      const result = await messagesApi.sendMessage(auth.sessionId, chatId, text, replyTo);
+      console.log('sendMessage result:', result);
+      return result;
     } catch (err) {
+      console.error('sendMessage error:', err);
       setError(err instanceof Error ? err.message : 'Failed to send message');
       return null;
     }

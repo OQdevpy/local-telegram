@@ -25,7 +25,7 @@ async def upload_and_send(
 ):
     """Upload and send a file to a chat"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -67,7 +67,7 @@ async def download_media(
 ):
     """Download media from a message"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -100,7 +100,7 @@ async def get_media_preview(
 ):
     """Get media preview as base64"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 

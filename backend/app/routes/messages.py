@@ -21,7 +21,7 @@ async def get_messages(
 ):
     """Get messages from a chat"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -42,7 +42,7 @@ async def get_messages(
 async def send_message(request: SendMessageRequest, session_id: str = Query(...)):
     """Send a text message"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -63,7 +63,7 @@ async def send_message(request: SendMessageRequest, session_id: str = Query(...)
 async def edit_message(request: EditMessageRequest, session_id: str = Query(...)):
     """Edit a message"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -84,7 +84,7 @@ async def edit_message(request: EditMessageRequest, session_id: str = Query(...)
 async def delete_messages(request: DeleteMessageRequest, session_id: str = Query(...)):
     """Delete messages"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -109,7 +109,7 @@ async def forward_messages(
 ):
     """Forward messages to another chat"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 

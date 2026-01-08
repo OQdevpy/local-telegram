@@ -15,11 +15,11 @@ class AvatarsRequest(BaseModel):
 @router.get("/dialogs", response_model=DialogsResponse)
 async def get_dialogs(
     session_id: str = Query(..., description="Session ID"),
-    limit: int = Query(100, ge=1, le=500, description="Number of dialogs to fetch")
+    limit: int = Query(300, ge=1, le=500, description="Number of dialogs to fetch")
 ):
     """Get list of all dialogs/chats"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -37,7 +37,7 @@ async def get_contacts(
 ):
     """Get all contacts from Telegram"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -56,7 +56,7 @@ async def get_dialog(
 ):
     """Get single dialog info"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -75,7 +75,7 @@ async def get_avatar(
 ):
     """Get profile photo as base64"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -94,7 +94,7 @@ async def get_avatars(
 ):
     """Get multiple profile photos as base64"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -113,7 +113,7 @@ async def mark_as_read(
 ):
     """Mark all messages in chat as read"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
@@ -132,7 +132,7 @@ async def send_typing(
 ):
     """Send typing indicator"""
     try:
-        client = telegram_manager.get_client(session_id)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 

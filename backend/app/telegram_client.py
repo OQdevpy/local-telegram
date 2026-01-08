@@ -18,18 +18,67 @@ import asyncio
 import uuid
 import base64
 import os
+import json
 
 from app.config import get_settings
+
+SESSIONS_FILE = "sessions.json"
 
 
 class TelegramManager:
     def __init__(self):
         self.clients: Dict[str, TelegramClient] = {}
         self.sessions: Dict[str, str] = {}  # session_id -> phone
+        self.session_strings: Dict[str, str] = {}  # session_id -> session_string
         self.ws_callbacks: Dict[str, Callable] = {}
         settings = get_settings()
         self.api_id = settings.telegram_api_id
         self.api_hash = settings.telegram_api_hash
+        self._load_sessions()
+
+    def _load_sessions(self):
+        """Load saved sessions from file"""
+        try:
+            if os.path.exists(SESSIONS_FILE):
+                with open(SESSIONS_FILE, 'r') as f:
+                    self.session_strings = json.load(f)
+                print(f"Loaded {len(self.session_strings)} saved sessions")
+        except Exception as e:
+            print(f"Error loading sessions: {e}")
+            self.session_strings = {}
+
+    def _save_sessions(self):
+        """Save sessions to file"""
+        try:
+            with open(SESSIONS_FILE, 'w') as f:
+                json.dump(self.session_strings, f)
+        except Exception as e:
+            print(f"Error saving sessions: {e}")
+
+    async def _auto_restore_session(self, session_id: str) -> Optional[TelegramClient]:
+        """Auto-restore a session from saved session_string"""
+        if session_id not in self.session_strings:
+            return None
+
+        try:
+            session_string = self.session_strings[session_id]
+            session = StringSession(session_string)
+            client = TelegramClient(session, self.api_id, self.api_hash)
+            await client.connect()
+
+            if await client.is_user_authorized():
+                self.clients[session_id] = client
+                print(f"Auto-restored session: {session_id}")
+                return client
+            else:
+                # Session expired, remove it
+                del self.session_strings[session_id]
+                self._save_sessions()
+                await client.disconnect()
+        except Exception as e:
+            print(f"Error auto-restoring session {session_id}: {e}")
+
+        return None
 
     async def create_client(self, session_id: str = None, session_string: str = None) -> tuple[str, TelegramClient]:
         """Create a new Telegram client"""
@@ -45,6 +94,15 @@ class TelegramManager:
     def get_client(self, session_id: str) -> Optional[TelegramClient]:
         """Get existing client by session ID"""
         return self.clients.get(session_id)
+
+    async def get_client_or_restore(self, session_id: str) -> Optional[TelegramClient]:
+        """Get existing client or auto-restore from saved session"""
+        client = self.clients.get(session_id)
+        if client:
+            return client
+
+        # Try to auto-restore
+        return await self._auto_restore_session(session_id)
 
     async def send_code(self, session_id: str, phone: str) -> str:
         """Send verification code to phone number"""
@@ -72,11 +130,17 @@ class TelegramManager:
         try:
             user = await client.sign_in(phone, code, phone_code_hash=phone_code_hash)
             session_string = client.session.save()
+            # Save session to file
+            self.session_strings[session_id] = session_string
+            self._save_sessions()
             return True, session_string, self._format_user(user)
         except SessionPasswordNeededError:
             if password:
                 user = await client.sign_in(password=password)
                 session_string = client.session.save()
+                # Save session to file
+                self.session_strings[session_id] = session_string
+                self._save_sessions()
                 return True, session_string, self._format_user(user)
             return False, None, {"needs_2fa": True}
         except PhoneCodeInvalidError:
@@ -90,6 +154,9 @@ class TelegramManager:
 
         user = await client.sign_in(password=password)
         session_string = client.session.save()
+        # Save session to file
+        self.session_strings[session_id] = session_string
+        self._save_sessions()
         return session_string, self._format_user(user)
 
     async def restore_session(self, session_string: str) -> tuple[str, dict]:
@@ -98,6 +165,10 @@ class TelegramManager:
 
         if not await client.is_user_authorized():
             raise ValueError("Session expired or invalid")
+
+        # Save session to file
+        self.session_strings[session_id] = session_string
+        self._save_sessions()
 
         me = await client.get_me()
         return session_id, self._format_user(me)
@@ -113,6 +184,10 @@ class TelegramManager:
                 del self.sessions[session_id]
             if session_id in self.ws_callbacks:
                 del self.ws_callbacks[session_id]
+            # Remove saved session
+            if session_id in self.session_strings:
+                del self.session_strings[session_id]
+                self._save_sessions()
 
     async def disconnect_all(self):
         """Disconnect all clients on shutdown"""
@@ -127,7 +202,7 @@ class TelegramManager:
     # Contacts methods
     async def get_contacts(self, session_id: str) -> List[dict]:
         """Get all contacts from Telegram"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -171,22 +246,29 @@ class TelegramManager:
     # Dialog/Chat methods
     async def get_dialogs(self, session_id: str, limit: int = 100) -> List[dict]:
         """Get list of dialogs"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
+        print(f"Getting dialogs for session {session_id}, limit={limit}")
         dialogs = await client.get_dialogs(limit=limit)
+        print(f"Got {len(dialogs)} raw dialogs")
         result = []
 
         for d in dialogs:
-            dialog_data = await self._format_dialog(client, d)
-            result.append(dialog_data)
+            try:
+                dialog_data = await self._format_dialog(client, d)
+                result.append(dialog_data)
+            except Exception as e:
+                print(f"Error formatting dialog {d.id}: {e}")
+                continue
 
+        print(f"Formatted {len(result)} dialogs")
         return result
 
     async def get_dialog_by_id(self, session_id: str, chat_id: int) -> dict:
         """Get single dialog by ID"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -202,7 +284,7 @@ class TelegramManager:
         offset_id: int = 0
     ) -> List[dict]:
         """Get messages from a chat"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -221,15 +303,18 @@ class TelegramManager:
         reply_to: int = None
     ) -> dict:
         """Send a text message"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
+
+        print(f"Sending message to chat_id={chat_id}, text={text[:50]}...")
 
         msg = await client.send_message(
             chat_id,
             text,
             reply_to=reply_to
         )
+        print(f"Message sent, id={msg.id}")
         return await self._format_message(client, msg)
 
     async def edit_message(
@@ -240,7 +325,7 @@ class TelegramManager:
         text: str
     ) -> dict:
         """Edit a message"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -254,7 +339,7 @@ class TelegramManager:
         message_ids: List[int]
     ) -> bool:
         """Delete messages"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -269,7 +354,7 @@ class TelegramManager:
         message_ids: List[int]
     ) -> List[dict]:
         """Forward messages"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -278,7 +363,7 @@ class TelegramManager:
 
     async def mark_as_read(self, session_id: str, chat_id: int):
         """Mark all messages in chat as read"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -286,7 +371,7 @@ class TelegramManager:
 
     async def send_typing(self, session_id: str, chat_id: int):
         """Send typing indicator"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -302,7 +387,7 @@ class TelegramManager:
         reply_to: int = None
     ) -> dict:
         """Send a file/media"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -322,7 +407,7 @@ class TelegramManager:
         download_path: str = None
     ) -> str:
         """Download media from a message"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             raise ValueError("Client not found")
 
@@ -334,7 +419,7 @@ class TelegramManager:
 
     async def get_profile_photo(self, session_id: str, entity_id: int) -> Optional[str]:
         """Get profile photo as base64"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             return None
 
@@ -348,7 +433,7 @@ class TelegramManager:
 
     async def get_profile_photos_batch(self, session_id: str, entity_ids: List[int]) -> Dict[int, str]:
         """Get multiple profile photos as base64"""
-        client = self.clients.get(session_id)
+        client = await self.get_client_or_restore(session_id)
         if not client:
             return {}
 
@@ -507,14 +592,9 @@ class TelegramManager:
         elif isinstance(entity, Channel):
             entity_type = "channel" if entity.broadcast else "supergroup"
             username = entity.username
-            # Get member count for supergroups/channels
-            try:
-                full = await client(GetFullChannelRequest(entity))
-                members_count = full.full_chat.participants_count
-            except Exception:
-                # Fallback to basic participants_count
-                if hasattr(entity, 'participants_count'):
-                    members_count = entity.participants_count
+            # Use basic participants_count (don't call GetFullChannelRequest for every dialog - too slow)
+            if hasattr(entity, 'participants_count'):
+                members_count = entity.participants_count
 
         last_msg = dialog.message
         last_message_text = ""

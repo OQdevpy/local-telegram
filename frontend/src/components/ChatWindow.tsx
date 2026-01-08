@@ -58,6 +58,7 @@ export const ChatWindow: React.FC = () => {
     activeChat,
     messages,
     dialogs,
+    contacts,
     auth,
     avatars,
     setReplyTo,
@@ -73,8 +74,11 @@ export const ChatWindow: React.FC = () => {
   } | null>(null);
   const [mediaPreviews, setMediaPreviews] = useState<Record<string, string>>({});
   const loadingPreviewsRef = useRef<Set<string>>(new Set());
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
 
-  const activeDialog = dialogs.find((d) => d.id === activeChat);
+  // Find active dialog from dialogs or contacts
+  const activeDialog = dialogs.find((d) => d.id === activeChat) ||
+                       contacts.find((c) => c.id === activeChat);
   const chatMessages = activeChat ? messages[activeChat] || [] : [];
 
   // Load media previews for photo messages
@@ -115,11 +119,22 @@ export const ChatWindow: React.FC = () => {
   }, [activeChat, chatMessages, loadMediaPreview]);
 
   useEffect(() => {
-    if (activeChat) {
-      loadMessages(activeChat);
-      markAsRead(activeChat);
-    }
-  }, [activeChat, loadMessages, markAsRead]);
+    const loadChatMessages = async () => {
+      if (activeChat && auth.sessionId) {
+        console.log('Loading messages for chat:', activeChat);
+        setIsLoadingMessages(true);
+        try {
+          await loadMessages(activeChat);
+          markAsRead(activeChat);
+        } catch (err) {
+          console.error('Error loading messages:', err);
+        } finally {
+          setIsLoadingMessages(false);
+        }
+      }
+    };
+    loadChatMessages();
+  }, [activeChat, auth.sessionId]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -268,6 +283,23 @@ export const ChatWindow: React.FC = () => {
           backgroundColor: '#0e1621'
         }}
       >
+        {/* Loading indicator */}
+        {isLoadingMessages && chatMessages.length === 0 && (
+          <div className="flex-1 flex items-center justify-center py-8">
+            <div className="text-center">
+              <div className="w-10 h-10 border-3 border-[#3390ec] border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+              <p className="text-[#6c7883]">Xabarlar yuklanmoqda...</p>
+            </div>
+          </div>
+        )}
+
+        {/* No messages */}
+        {!isLoadingMessages && chatMessages.length === 0 && (
+          <div className="flex-1 flex items-center justify-center py-8">
+            <p className="text-[#6c7883]">Xabarlar yo'q</p>
+          </div>
+        )}
+
         <div className="max-w-[780px] mx-auto">
           {[...chatMessages].reverse().map((message, index, arr) => {
             const prevMessage = arr[index - 1];
