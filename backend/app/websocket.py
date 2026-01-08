@@ -22,8 +22,8 @@ class ConnectionManager:
         self.active_connections[session_id].add(websocket)
         self.websocket_sessions[websocket] = session_id
 
-        # Setup Telegram event handlers if client exists
-        client = telegram_manager.get_client(session_id)
+        # Setup Telegram event handlers if client exists (try to auto-restore)
+        client = await telegram_manager.get_client_or_restore(session_id)
         if client:
             telegram_manager.setup_handlers(session_id, self._create_callback(session_id))
 
