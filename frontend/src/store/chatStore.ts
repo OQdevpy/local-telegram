@@ -13,6 +13,10 @@ interface ChatStore {
   setDialogs: (dialogs: Dialog[]) => void;
   updateDialog: (dialogId: number, updates: Partial<Dialog>) => void;
 
+  // Contacts state
+  contacts: Dialog[];
+  setContacts: (contacts: Dialog[]) => void;
+
   // Active chat
   activeChat: number | null;
   setActiveChat: (chatId: number | null) => void;
@@ -59,14 +63,18 @@ export const useChatStore = create<ChatStore>()(
         set((state) => ({
           auth: { ...state.auth, ...auth },
         })),
-      clearAuth: () =>
+      clearAuth: () => {
+        // Clear localStorage completely on logout
+        localStorage.removeItem('telegram-clone-storage');
         set({
           auth: initialAuthState,
           dialogs: [],
+          contacts: [],
           messages: {},
           activeChat: null,
           avatars: {},
-        }),
+        });
+      },
 
       // Dialogs
       dialogs: [],
@@ -77,6 +85,10 @@ export const useChatStore = create<ChatStore>()(
             d.id === dialogId ? { ...d, ...updates } : d
           ),
         })),
+
+      // Contacts
+      contacts: [],
+      setContacts: (contacts) => set({ contacts }),
 
       // Active chat
       activeChat: null,
@@ -91,7 +103,6 @@ export const useChatStore = create<ChatStore>()(
       addMessage: (chatId, message) =>
         set((state) => {
           const existing = state.messages[chatId] || [];
-          // Check if message already exists
           if (existing.some((m) => m.id === message.id)) {
             return state;
           }
@@ -160,7 +171,7 @@ export const useChatStore = create<ChatStore>()(
     }),
     {
       name: 'telegram-clone-storage',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage), // localStorage ga o'zgartirdik
       partialize: (state) => ({
         auth: {
           sessionString: state.auth.sessionString,
@@ -169,6 +180,7 @@ export const useChatStore = create<ChatStore>()(
           user: state.auth.user,
         },
         dialogs: state.dialogs,
+        contacts: state.contacts,
         avatars: state.avatars,
         activeChat: state.activeChat,
       }),

@@ -37,8 +37,8 @@ const getAvatarGradient = (id: number) => {
 type FilterTab = 'all' | 'users' | 'groups' | 'channels';
 
 export const ChatList: React.FC = () => {
-  const { dialogs, activeChat, setActiveChat, auth, avatars } = useChatStore();
-  const { loadDialogs, loadAvatars, logout } = useTelegram();
+  const { dialogs, contacts, activeChat, setActiveChat, auth, avatars } = useChatStore();
+  const { loadDialogs, loadContacts, loadAvatars, logout } = useTelegram();
   const [searchQuery, setSearchQuery] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
@@ -46,15 +46,23 @@ export const ChatList: React.FC = () => {
   useEffect(() => {
     if (auth.isAuthenticated) {
       loadDialogs();
+      loadContacts();
     }
-  }, [auth.isAuthenticated, loadDialogs]);
+  }, [auth.isAuthenticated, loadDialogs, loadContacts]);
 
   // Load avatars after dialogs are loaded
   useEffect(() => {
     if (dialogs.length > 0 && auth.isAuthenticated) {
       loadAvatars(dialogs.map(d => d.id));
     }
-  }, [dialogs.length, auth.isAuthenticated]);
+  }, [dialogs.length, auth.isAuthenticated, loadAvatars]);
+
+  // Load avatars for contacts
+  useEffect(() => {
+    if (contacts.length > 0 && auth.isAuthenticated) {
+      loadAvatars(contacts.map(c => c.id));
+    }
+  }, [contacts.length, auth.isAuthenticated, loadAvatars]);
 
   const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '';
@@ -87,7 +95,8 @@ export const ChatList: React.FC = () => {
     // Filter by tab
     switch (activeTab) {
       case 'users':
-        filtered = dialogs.filter(d => d.type === 'user');
+        // Use contacts list for users tab
+        filtered = contacts;
         break;
       case 'groups':
         filtered = dialogs.filter(d => d.type === 'group' || d.type === 'supergroup');
@@ -107,15 +116,15 @@ export const ChatList: React.FC = () => {
     }
 
     return filtered;
-  }, [dialogs, activeTab, searchQuery]);
+  }, [dialogs, contacts, activeTab, searchQuery]);
 
   // Count by type
   const counts = useMemo(() => ({
     all: dialogs.length,
-    users: dialogs.filter(d => d.type === 'user').length,
+    users: contacts.length,
     groups: dialogs.filter(d => d.type === 'group' || d.type === 'supergroup').length,
     channels: dialogs.filter(d => d.type === 'channel').length,
-  }), [dialogs]);
+  }), [dialogs, contacts]);
 
   const tabs: { key: FilterTab; label: string; icon: React.ReactNode; count: number }[] = [
     { key: 'all', label: 'Hammasi', icon: <MessageCircle size={18} />, count: counts.all },
@@ -307,7 +316,17 @@ export const ChatList: React.FC = () => {
                     <p className={`text-[14px] truncate ${
                       isActive ? 'text-[#a0c5dd]' : 'text-gray-400'
                     }`}>
-                      {dialog.last_message || 'Xabar yo\'q'}
+                      {activeTab === 'users' && dialog.status ? (
+                        <span className={dialog.status === 'online' ? 'text-[#3390ec]' : ''}>
+                          {dialog.status === 'online' ? 'online' : dialog.status}
+                        </span>
+                      ) : (dialog.type === 'supergroup' || dialog.type === 'group') && dialog.members_count ? (
+                        `${dialog.members_count.toLocaleString()} a'zo`
+                      ) : dialog.type === 'channel' && dialog.members_count ? (
+                        `${dialog.members_count.toLocaleString()} obunachi`
+                      ) : (
+                        dialog.last_message || 'Xabar yo\'q'
+                      )}
                     </p>
                     {dialog.unread_count > 0 && (
                       <span className={`min-w-[22px] h-[22px] flex items-center justify-center rounded-full text-xs font-medium flex-shrink-0 ml-2 ${
