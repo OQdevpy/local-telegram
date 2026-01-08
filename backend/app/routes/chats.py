@@ -1,9 +1,15 @@
 from fastapi import APIRouter, HTTPException, Query
+from pydantic import BaseModel
 from app.telegram_client import telegram_manager
 from app.models.schemas import DialogsResponse
-from typing import Optional
+from typing import Optional, List
+import asyncio
 
 router = APIRouter(tags=["chats"])
+
+
+class AvatarsRequest(BaseModel):
+    entity_ids: List[int]
 
 
 @router.get("/dialogs", response_model=DialogsResponse)
@@ -19,6 +25,24 @@ async def get_dialogs(
 
         dialogs = await telegram_manager.get_dialogs(session_id, limit)
         return DialogsResponse(dialogs=dialogs)
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/contacts")
+async def get_contacts(
+    session_id: str = Query(..., description="Session ID")
+):
+    """Get all contacts from Telegram"""
+    try:
+        client = telegram_manager.get_client(session_id)
+        if not client:
+            raise HTTPException(status_code=401, detail="Session not found")
+
+        contacts = await telegram_manager.get_contacts(session_id)
+        return {"contacts": contacts}
     except HTTPException:
         raise
     except Exception as e:
@@ -57,6 +81,25 @@ async def get_avatar(
 
         photo = await telegram_manager.get_profile_photo(session_id, entity_id)
         return {"avatar": photo}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/avatars")
+async def get_avatars(
+    request: AvatarsRequest,
+    session_id: str = Query(..., description="Session ID")
+):
+    """Get multiple profile photos as base64"""
+    try:
+        client = telegram_manager.get_client(session_id)
+        if not client:
+            raise HTTPException(status_code=401, detail="Session not found")
+
+        avatars = await telegram_manager.get_profile_photos_batch(session_id, request.entity_ids)
+        return {"avatars": avatars}
     except HTTPException:
         raise
     except Exception as e:

@@ -11,6 +11,9 @@ export interface Dialog {
   id: number;
   name: string;
   type: 'user' | 'group' | 'channel' | 'supergroup';
+  username?: string;
+  status?: string;
+  members_count?: number;
   avatar?: string;
   last_message?: string;
   last_message_date?: string;

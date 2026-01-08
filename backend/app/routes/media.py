@@ -95,30 +95,41 @@ async def download_media(
 async def get_media_preview(
     chat_id: int,
     message_id: int,
-    session_id: str = Query(...)
+    session_id: str = Query(...),
+    full: bool = Query(False, description="Download full quality")
 ):
-    """Get media preview (thumbnail) as base64"""
+    """Get media preview as base64"""
     try:
         client = telegram_manager.get_client(session_id)
         if not client:
             raise HTTPException(status_code=401, detail="Session not found")
 
-        # Download thumbnail
         tg_client = client
         message = await tg_client.get_messages(chat_id, ids=message_id)
 
         if not message or not message.media:
             raise HTTPException(status_code=404, detail="Media not found")
 
-        # Download as bytes
         import base64
-        thumb = await tg_client.download_media(message, bytes, thumb=-1)  # -1 for smallest thumb
+        from telethon.tl.types import MessageMediaPhoto
 
-        if thumb:
-            return {
-                "preview": base64.b64encode(thumb).decode(),
-                "type": "image/jpeg"
-            }
+        # For photos, download the actual image (not thumbnail)
+        if isinstance(message.media, MessageMediaPhoto):
+            # Download the photo itself (medium quality by default)
+            photo_bytes = await tg_client.download_media(message, bytes)
+            if photo_bytes:
+                return {
+                    "preview": base64.b64encode(photo_bytes).decode(),
+                    "type": "image/jpeg"
+                }
+        else:
+            # For other media types, download thumbnail
+            thumb = await tg_client.download_media(message, bytes, thumb=0)  # 0 for larger thumb
+            if thumb:
+                return {
+                    "preview": base64.b64encode(thumb).decode(),
+                    "type": "image/jpeg"
+                }
 
         raise HTTPException(status_code=404, detail="Preview not available")
     except HTTPException:

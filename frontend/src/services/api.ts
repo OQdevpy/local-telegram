@@ -111,6 +111,13 @@ export const chatsApi = {
       params: { session_id: sessionId },
     });
   },
+
+  getContacts: async (sessionId: string): Promise<Dialog[]> => {
+    const response = await api.get('/chats/contacts', {
+      params: { session_id: sessionId },
+    });
+    return response.data.contacts;
+  },
 };
 
 // Messages API

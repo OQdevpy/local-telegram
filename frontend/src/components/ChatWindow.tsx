@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useCallback, useState } from 'react';
 import { useChatStore } from '../store/chatStore';
 import { useTelegram } from '../hooks/useTelegram';
 import { MessageInput } from './MessageInput';
+import { mediaApi } from '../services/api';
 import { format } from 'date-fns';
 import {
   MoreVertical,
@@ -19,6 +20,9 @@ import {
   Copy,
   Forward,
   Pin,
+  Download,
+  Play,
+  Users,
 } from 'lucide-react';
 import type { Message } from '../types';
 
@@ -54,6 +58,8 @@ export const ChatWindow: React.FC = () => {
     activeChat,
     messages,
     dialogs,
+    auth,
+    avatars,
     setReplyTo,
     setEditingMessage,
   } = useChatStore();
@@ -65,9 +71,48 @@ export const ChatWindow: React.FC = () => {
     y: number;
     message: Message;
   } | null>(null);
+  const [mediaPreviews, setMediaPreviews] = useState<Record<string, string>>({});
+  const loadingPreviewsRef = useRef<Set<string>>(new Set());
 
   const activeDialog = dialogs.find((d) => d.id === activeChat);
   const chatMessages = activeChat ? messages[activeChat] || [] : [];
+
+  // Load media previews for photo messages
+  const loadMediaPreview = useCallback(async (chatId: number, messageId: number) => {
+    const key = `${chatId}-${messageId}`;
+    if (loadingPreviewsRef.current.has(key) || !auth.sessionId) return;
+
+    // Check if already loaded
+    setMediaPreviews(prev => {
+      if (prev[key]) return prev;
+
+      // Not loaded, start loading
+      loadingPreviewsRef.current.add(key);
+
+      mediaApi.getPreview(auth.sessionId!, chatId, messageId)
+        .then(result => {
+          if (result?.preview) {
+            setMediaPreviews(p => ({ ...p, [key]: result.preview }));
+          }
+        })
+        .catch(err => console.error('Failed to load preview:', err))
+        .finally(() => {
+          loadingPreviewsRef.current.delete(key);
+        });
+
+      return prev;
+    });
+  }, [auth.sessionId]);
+
+  // Load previews for visible photo messages
+  useEffect(() => {
+    if (!activeChat) return;
+    chatMessages.forEach(msg => {
+      if (msg.media_type === 'photo') {
+        loadMediaPreview(activeChat, msg.id);
+      }
+    });
+  }, [activeChat, chatMessages, loadMediaPreview]);
 
   useEffect(() => {
     if (activeChat) {
@@ -121,17 +166,29 @@ export const ChatWindow: React.FC = () => {
     }
   };
 
-  const getTypeLabel = (type: string) => {
-    switch (type) {
-      case 'supergroup':
-        return 'supergroup';
-      case 'group':
-        return 'group';
-      case 'channel':
-        return 'channel';
-      default:
-        return null;
+  const getStatusText = () => {
+    if (!activeDialog) return '';
+
+    if (activeDialog.type === 'supergroup' || activeDialog.type === 'group') {
+      if (activeDialog.members_count) {
+        return `${activeDialog.members_count.toLocaleString()} a'zo`;
+      }
+      return activeDialog.type === 'supergroup' ? 'superguruh' : 'guruh';
     }
+
+    if (activeDialog.type === 'channel') {
+      if (activeDialog.members_count) {
+        return `${activeDialog.members_count.toLocaleString()} obunachi`;
+      }
+      return 'kanal';
+    }
+
+    // User - show status
+    if (activeDialog.status) {
+      return activeDialog.status;
+    }
+
+    return 'last seen recently';
   };
 
   if (!activeChat || !activeDialog) {
@@ -159,17 +216,32 @@ export const ChatWindow: React.FC = () => {
       <div className="h-[56px] bg-[#17212b] flex items-center justify-between px-4 border-b border-[#101921]">
         <div className="flex items-center gap-3">
           <div
-            className="w-[42px] h-[42px] rounded-full flex items-center justify-center text-white font-medium"
+            className="w-[42px] h-[42px] rounded-full flex items-center justify-center text-white font-medium overflow-hidden"
             style={{
-              background: `linear-gradient(135deg, ${getAvatarGradient(activeDialog.id)[0]}, ${getAvatarGradient(activeDialog.id)[1]})`
+              background: avatars[activeDialog.id]
+                ? undefined
+                : `linear-gradient(135deg, ${getAvatarGradient(activeDialog.id)[0]}, ${getAvatarGradient(activeDialog.id)[1]})`
             }}
           >
-            {activeDialog.name.charAt(0).toUpperCase()}
+            {avatars[activeDialog.id] ? (
+              <img
+                src={`data:image/jpeg;base64,${avatars[activeDialog.id]}`}
+                alt={activeDialog.name}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              activeDialog.name.charAt(0).toUpperCase()
+            )}
           </div>
           <div>
-            <h2 className="font-medium text-white text-[16px]">{activeDialog.name}</h2>
-            <p className="text-[13px] text-[#6c7883]">
-              {getTypeLabel(activeDialog.type) || 'last seen recently'}
+            <div className="flex items-center gap-2">
+              {(activeDialog.type === 'supergroup' || activeDialog.type === 'group') && (
+                <Users size={16} className="text-[#6c7883]" />
+              )}
+              <h2 className="font-medium text-white text-[16px]">{activeDialog.name}</h2>
+            </div>
+            <p className={`text-[13px] ${activeDialog.status === 'online' ? 'text-[#3390ec]' : 'text-[#6c7883]'}`}>
+              {getStatusText()}
             </p>
           </div>
         </div>
@@ -248,17 +320,78 @@ export const ChatWindow: React.FC = () => {
                       </div>
                     )}
 
-                    {/* Media indicator */}
-                    {message.media_type && (
+                    {/* Photo preview */}
+                    {message.media_type === 'photo' && activeChat && (
+                      <div className="mb-[6px] -mx-[10px] -mt-[6px] rounded-t-lg overflow-hidden">
+                        {mediaPreviews[`${activeChat}-${message.id}`] ? (
+                          <div className="relative group cursor-pointer">
+                            <img
+                              src={`data:image/jpeg;base64,${mediaPreviews[`${activeChat}-${message.id}`]}`}
+                              alt="Photo"
+                              className="max-w-full max-h-[400px] object-contain"
+                            />
+                            <a
+                              href={mediaApi.getDownloadUrl(auth.sessionId!, activeChat, message.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="absolute top-2 right-2 w-8 h-8 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <Download size={16} className="text-white" />
+                            </a>
+                          </div>
+                        ) : (
+                          <div className="w-[300px] h-[200px] bg-[#1a2836] flex items-center justify-center">
+                            <div className="animate-pulse flex items-center gap-2">
+                              <Image size={24} className="text-[#3390ec]" />
+                              <span className="text-[#6c7883]">Yuklanmoqda...</span>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Video indicator */}
+                    {(message.media_type === 'video' || message.media_type === 'video_note') && (
+                      <div className="mb-[6px] -mx-[10px] -mt-[6px] rounded-t-lg overflow-hidden">
+                        <div className="w-[300px] h-[200px] bg-[#1a2836] flex items-center justify-center relative cursor-pointer group">
+                          <div className="w-14 h-14 bg-black/50 rounded-full flex items-center justify-center group-hover:bg-[#3390ec] transition-colors">
+                            <Play size={28} className="text-white ml-1" />
+                          </div>
+                          <a
+                            href={auth.sessionId ? mediaApi.getDownloadUrl(auth.sessionId, activeChat!, message.id) : '#'}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="absolute top-2 right-2 w-8 h-8 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <Download size={16} className="text-white" />
+                          </a>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Other media types */}
+                    {message.media_type && !['photo', 'video', 'video_note'].includes(message.media_type) && (
                       <div className="flex items-center gap-2 mb-[4px]">
                         {getMediaIcon(message.media_type)}
                         <span className="text-[14px] text-[#6ab2f2]">
-                          {message.media_type === 'photo' ? 'Photo' :
-                           message.media_type === 'video' ? 'Video' :
-                           message.media_type === 'document' ? (message.media_info || 'Document') :
+                          {message.media_type === 'document' ? (message.media_info || 'Document') :
                            message.media_type === 'voice' ? 'Voice message' :
+                           message.media_type === 'audio' ? 'Audio' :
+                           message.media_type === 'sticker' ? 'Sticker' :
                            message.media_type}
                         </span>
+                        {message.media_type === 'document' && auth.sessionId && (
+                          <a
+                            href={mediaApi.getDownloadUrl(auth.sessionId, activeChat!, message.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[#3390ec] hover:underline text-[13px]"
+                          >
+                            Yuklab olish
+                          </a>
+                        )}
                       </div>
                     )}
 

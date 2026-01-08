@@ -9,6 +9,7 @@ export const useTelegram = () => {
     setAuth,
     clearAuth,
     setDialogs,
+    setContacts,
     setMessages,
     prependMessages,
     setIsLoading,
@@ -167,6 +168,17 @@ export const useTelegram = () => {
     }
   }, [auth.sessionId, setDialogs, setIsLoading, setError]);
 
+  const loadContacts = useCallback(async () => {
+    if (!auth.sessionId) return;
+
+    try {
+      const contacts = await chatsApi.getContacts(auth.sessionId);
+      setContacts(contacts);
+    } catch (err) {
+      console.error('Failed to load contacts:', err);
+    }
+  }, [auth.sessionId, setContacts]);
+
   // Load avatars for multiple entities
   const loadAvatars = useCallback(async (entityIds: number[]) => {
     if (!auth.sessionId) return;
@@ -178,7 +190,12 @@ export const useTelegram = () => {
     try {
       const result = await chatsApi.getAvatars(auth.sessionId, uncachedIds);
       if (result && Object.keys(result).length > 0) {
-        setAvatars(result);
+        // Convert string keys to number keys (JSON serializes int keys as strings)
+        const normalized: Record<number, string> = {};
+        for (const [key, value] of Object.entries(result)) {
+          normalized[Number(key)] = value;
+        }
+        setAvatars(normalized);
       }
     } catch (err) {
       console.error('Failed to load avatars:', err);
@@ -288,6 +305,7 @@ export const useTelegram = () => {
 
     // Chats
     loadDialogs,
+    loadContacts,
     loadAvatars,
     loadAvatar,
     loadMessages,

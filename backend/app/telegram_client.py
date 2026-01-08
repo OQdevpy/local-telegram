@@ -5,10 +5,13 @@ from telethon.tl.types import (
     User, Chat, Channel,
     MessageMediaPhoto, MessageMediaDocument,
     DocumentAttributeFilename, DocumentAttributeAudio,
-    DocumentAttributeVideo, DocumentAttributeSticker
+    DocumentAttributeVideo, DocumentAttributeSticker,
+    UserStatusOnline, UserStatusOffline, UserStatusRecently
 )
-from telethon.tl.functions.messages import SetTypingRequest
-from telethon.tl.types import SendMessageTypingAction
+from telethon.tl.functions.messages import SetTypingRequest, GetDialogsRequest
+from telethon.tl.functions.contacts import GetContactsRequest
+from telethon.tl.functions.channels import GetFullChannelRequest
+from telethon.tl.types import SendMessageTypingAction, InputPeerEmpty
 from typing import Optional, Callable, Dict, List, Any
 from datetime import datetime
 import asyncio
@@ -121,6 +124,50 @@ class TelegramManager:
         self.clients.clear()
         self.sessions.clear()
 
+    # Contacts methods
+    async def get_contacts(self, session_id: str) -> List[dict]:
+        """Get all contacts from Telegram"""
+        client = self.clients.get(session_id)
+        if not client:
+            raise ValueError("Client not found")
+
+        result = await client(GetContactsRequest(hash=0))
+        contacts = []
+
+        for user in result.users:
+            if isinstance(user, User) and not user.bot and not user.deleted:
+                status = self._get_user_status(user)
+                contacts.append({
+                    "id": user.id,
+                    "name": f"{user.first_name or ''} {user.last_name or ''}".strip() or "Unknown",
+                    "type": "user",
+                    "username": user.username,
+                    "phone": user.phone,
+                    "status": status,
+                    "last_message": None,
+                    "last_message_date": None,
+                    "unread_count": 0,
+                    "is_pinned": False,
+                    "is_muted": False,
+                })
+
+        return contacts
+
+    def _get_user_status(self, user) -> str:
+        """Get user online status"""
+        if not user.status:
+            return "last seen a long time ago"
+        if isinstance(user.status, UserStatusOnline):
+            return "online"
+        elif isinstance(user.status, UserStatusRecently):
+            return "last seen recently"
+        elif isinstance(user.status, UserStatusOffline):
+            was_online = user.status.was_online
+            if was_online:
+                return f"last seen {was_online.strftime('%d.%m.%Y %H:%M')}"
+            return "offline"
+        return "last seen a long time ago"
+
     # Dialog/Chat methods
     async def get_dialogs(self, session_id: str, limit: int = 100) -> List[dict]:
         """Get list of dialogs"""
@@ -129,7 +176,13 @@ class TelegramManager:
             raise ValueError("Client not found")
 
         dialogs = await client.get_dialogs(limit=limit)
-        return [await self._format_dialog(client, d) for d in dialogs]
+        result = []
+
+        for d in dialogs:
+            dialog_data = await self._format_dialog(client, d)
+            result.append(dialog_data)
+
+        return result
 
     async def get_dialog_by_id(self, session_id: str, chat_id: int) -> dict:
         """Get single dialog by ID"""
@@ -138,7 +191,7 @@ class TelegramManager:
             raise ValueError("Client not found")
 
         entity = await client.get_entity(chat_id)
-        return self._format_entity(entity)
+        return await self._format_entity_full(client, entity)
 
     # Message methods
     async def get_messages(
@@ -289,7 +342,46 @@ class TelegramManager:
             photo = await client.download_profile_photo(entity_id, bytes)
             if photo:
                 return base64.b64encode(photo).decode()
-        except:
+        except Exception as e:
+            print(f"Error downloading photo for {entity_id}: {e}")
+        return None
+
+    async def get_profile_photos_batch(self, session_id: str, entity_ids: List[int]) -> Dict[int, str]:
+        """Get multiple profile photos as base64"""
+        client = self.clients.get(session_id)
+        if not client:
+            return {}
+
+        result = {}
+
+        # Process in smaller batches to avoid rate limiting
+        batch_size = 5
+        for i in range(0, len(entity_ids), batch_size):
+            batch = entity_ids[i:i + batch_size]
+            tasks = []
+
+            for entity_id in batch:
+                tasks.append(self._get_single_photo(client, entity_id))
+
+            photos = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for entity_id, photo in zip(batch, photos):
+                if isinstance(photo, str) and photo:
+                    result[entity_id] = photo
+
+            # Delay between batches
+            if i + batch_size < len(entity_ids):
+                await asyncio.sleep(0.2)
+
+        return result
+
+    async def _get_single_photo(self, client: TelegramClient, entity_id: int) -> Optional[str]:
+        """Helper to get single photo"""
+        try:
+            photo = await client.download_profile_photo(entity_id, bytes)
+            if photo:
+                return base64.b64encode(photo).decode()
+        except Exception as e:
             pass
         return None
 
@@ -383,14 +475,46 @@ class TelegramManager:
             }
         return {"id": getattr(entity, 'id', 0), "type": "unknown", "name": "Unknown"}
 
+    async def _format_entity_full(self, client: TelegramClient, entity) -> dict:
+        """Format entity with full info"""
+        base = self._format_entity(entity)
+
+        # Get member count for groups/channels
+        if isinstance(entity, Channel):
+            try:
+                full = await client(GetFullChannelRequest(entity))
+                base["members_count"] = full.full_chat.participants_count
+            except:
+                base["members_count"] = 0
+
+        return base
+
     async def _format_dialog(self, client: TelegramClient, dialog) -> dict:
         """Format Telethon Dialog to dict"""
         entity = dialog.entity
         entity_type = "user"
-        if isinstance(entity, Chat):
+        members_count = None
+        status = None
+        username = None
+
+        if isinstance(entity, User):
+            entity_type = "user"
+            status = self._get_user_status(entity)
+            username = entity.username
+        elif isinstance(entity, Chat):
             entity_type = "group"
+            members_count = entity.participants_count if hasattr(entity, 'participants_count') else None
         elif isinstance(entity, Channel):
             entity_type = "channel" if entity.broadcast else "supergroup"
+            username = entity.username
+            # Get member count for supergroups/channels
+            try:
+                full = await client(GetFullChannelRequest(entity))
+                members_count = full.full_chat.participants_count
+            except Exception:
+                # Fallback to basic participants_count
+                if hasattr(entity, 'participants_count'):
+                    members_count = entity.participants_count
 
         last_msg = dialog.message
         last_message_text = ""
@@ -398,13 +522,20 @@ class TelegramManager:
             if last_msg.text:
                 last_message_text = last_msg.text[:100]
             elif last_msg.media:
-                last_message_text = "[Media]"
+                if isinstance(last_msg.media, MessageMediaPhoto):
+                    last_message_text = "📷 Photo"
+                elif isinstance(last_msg.media, MessageMediaDocument):
+                    last_message_text = "📎 Document"
+                else:
+                    last_message_text = "📎 Media"
 
         return {
             "id": dialog.id,
             "name": dialog.name or "Unknown",
             "type": entity_type,
-            "avatar": None,  # Will be loaded separately
+            "username": username,
+            "status": status,
+            "members_count": members_count,
             "last_message": last_message_text,
             "last_message_date": last_msg.date.isoformat() if last_msg and last_msg.date else None,
             "unread_count": dialog.unread_count,
