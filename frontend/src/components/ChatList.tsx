@@ -37,32 +37,46 @@ const getAvatarGradient = (id: number) => {
 type FilterTab = 'all' | 'users' | 'groups' | 'channels';
 
 export const ChatList: React.FC = () => {
-  const { dialogs, contacts, activeChat, setActiveChat, auth, avatars } = useChatStore();
+  const { dialogs, contacts, activeChat, setActiveChat, auth, avatars, isLoading } = useChatStore();
   const { loadDialogs, loadContacts, loadAvatars, logout } = useTelegram();
   const [searchQuery, setSearchQuery] = useState('');
   const [showMenu, setShowMenu] = useState(false);
   const [activeTab, setActiveTab] = useState<FilterTab>('all');
+  const [isLoadingData, setIsLoadingData] = useState(false);
 
+  // Load dialogs and contacts when authenticated and sessionId is available
   useEffect(() => {
-    if (auth.isAuthenticated) {
-      loadDialogs();
-      loadContacts();
-    }
-  }, [auth.isAuthenticated, loadDialogs, loadContacts]);
+    const loadData = async () => {
+      if (auth.isAuthenticated && auth.sessionId) {
+        console.log('Loading dialogs and contacts, sessionId:', auth.sessionId);
+        setIsLoadingData(true);
+        try {
+          await Promise.all([loadDialogs(), loadContacts()]);
+        } catch (err) {
+          console.error('Error loading data:', err);
+        } finally {
+          setIsLoadingData(false);
+        }
+      }
+    };
+    loadData();
+  }, [auth.isAuthenticated, auth.sessionId, loadDialogs, loadContacts]);
 
   // Load avatars after dialogs are loaded
   useEffect(() => {
-    if (dialogs.length > 0 && auth.isAuthenticated) {
-      loadAvatars(dialogs.map(d => d.id));
+    if (dialogs.length > 0 && auth.sessionId) {
+      const ids = dialogs.map(d => d.id);
+      loadAvatars(ids);
     }
-  }, [dialogs.length, auth.isAuthenticated, loadAvatars]);
+  }, [dialogs, auth.sessionId]);
 
   // Load avatars for contacts
   useEffect(() => {
-    if (contacts.length > 0 && auth.isAuthenticated) {
-      loadAvatars(contacts.map(c => c.id));
+    if (contacts.length > 0 && auth.sessionId) {
+      const ids = contacts.map(c => c.id);
+      loadAvatars(ids);
     }
-  }, [contacts.length, auth.isAuthenticated, loadAvatars]);
+  }, [contacts, auth.sessionId]);
 
   const formatDate = (dateStr: string | undefined) => {
     if (!dateStr) return '';
@@ -261,6 +275,14 @@ export const ChatList: React.FC = () => {
 
       {/* Dialog list */}
       <div className="flex-1 overflow-y-auto">
+        {/* Loading indicator */}
+        {isLoadingData && dialogs.length === 0 && (
+          <div className="p-8 flex flex-col items-center justify-center">
+            <div className="w-10 h-10 border-3 border-[#3390ec] border-t-transparent rounded-full animate-spin mb-3"></div>
+            <p className="text-[#6c7883] text-sm">Chatlar yuklanmoqda...</p>
+          </div>
+        )}
+
         {filteredDialogs.map((dialog) => {
           const gradient = getAvatarGradient(dialog.id);
           const isActive = activeChat === dialog.id;

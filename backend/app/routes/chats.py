@@ -15,7 +15,7 @@ class AvatarsRequest(BaseModel):
 @router.get("/dialogs", response_model=DialogsResponse)
 async def get_dialogs(
     session_id: str = Query(..., description="Session ID"),
-    limit: int = Query(100, ge=1, le=500, description="Number of dialogs to fetch")
+    limit: int = Query(300, ge=1, le=500, description="Number of dialogs to fetch")
 ):
     """Get list of all dialogs/chats"""
     try:
